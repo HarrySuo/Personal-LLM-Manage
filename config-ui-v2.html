@@ -1,0 +1,659 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>大模型统一配置管理工具</title>
+    <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        body { font-family: 'Inter', sans-serif; }
+        .dotted-bg {
+            background-color: #05070A;
+            background-image: radial-gradient(circle, #1a1d24 1px, transparent 1px);
+            background-size: 24px 24px;
+        }
+    </style>
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        dark: { bg: '#05070A', card: '#0D1117', border: '#1a1d24' }
+                    }
+                }
+            }
+        }
+    </script>
+</head>
+<body class="dotted-bg min-h-screen">
+    <div id="root"></div>
+
+    <script type="text/babel">
+        const { useState, useEffect } = React;
+        const API_BASE = window.location.origin + '/api';
+
+        // 认证相关
+        const getToken = () => localStorage.getItem('auth_token') || '';
+        const setToken = (token) => localStorage.setItem('auth_token', token);
+        const clearToken = () => localStorage.removeItem('auth_token');
+
+        const authFetch = async (url, options = {}) => {
+            const token = getToken();
+            const headers = {
+                ...options.headers,
+                'Authorization': `Bearer ${token}`
+            };
+            const res = await fetch(url, { ...options, headers });
+            if (res.status === 401) {
+                clearToken();
+                window.location.reload();
+                throw new Error('Unauthorized');
+            }
+            return res;
+        };
+
+        const LoginScreen = ({ onLogin }) => {
+            const [token, setTokenInput] = useState('');
+            const [error, setError] = useState('');
+            const [loading, setLoading] = useState(false);
+
+            const handleLogin = async () => {
+                setLoading(true);
+                setError('');
+                try {
+                    const res = await fetch(`${API_BASE}/auth`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ token })
+                    });
+                    const data = await res.json();
+                    if (data.success) {
+                        setToken(token);
+                        onLogin();
+                    } else {
+                        setError(data.message || '认证失败');
+                    }
+                } catch (e) {
+                    setError('连接失败，请稍后重试');
+                } finally {
+                    setLoading(false);
+                }
+            };
+
+            return (
+                <div className="min-h-screen flex items-center justify-center">
+                    <div className="bg-dark-card border border-dark-border rounded-lg p-8 w-full max-w-sm">
+                        <h1 className="text-2xl font-bold text-white mb-2 text-center">配置管理工具</h1>
+                        <p className="text-gray-400 text-sm mb-6 text-center">请输入访问令牌</p>
+                        {error && (
+                            <div className="bg-red-500/10 border border-red-500/30 text-red-400 text-sm px-4 py-2 rounded mb-4">
+                                {error}
+                            </div>
+                        )}
+                        <input
+                            type="password"
+                            value={token}
+                            onChange={(e) => setTokenInput(e.target.value)}
+                            onKeyDown={(e) => e.key === 'Enter' && handleLogin()}
+                            placeholder="Access Token"
+                            className="w-full bg-dark-bg border border-dark-border text-white px-4 py-3 rounded-lg text-sm focus:border-blue-500 focus:outline-none transition-colors font-mono mb-4"
+                            autoFocus
+                        />
+                        <button
+                            onClick={handleLogin}
+                            disabled={loading || !token}
+                            className="w-full bg-blue-600 hover:bg-blue-500 disabled:bg-gray-600 text-white py-3 rounded-lg font-medium transition-colors"
+                        >
+                            {loading ? '验证中...' : '登录'}
+                        </button>
+                    </div>
+                </div>
+            );
+        };
+
+        const MainLayout = ({ children }) => (
+            <div className="min-h-screen py-8 px-4">
+                <div className="max-w-5xl mx-auto">{children}</div>
+            </div>
+        );
+
+        const ProviderCard = ({ provider, id, isActive, isSelected, onToggle, onSelect }) => (
+            <div
+                onClick={() => onSelect(id)}
+                className={`bg-dark-card border rounded-lg p-5 transition-all duration-300 cursor-pointer ${
+                    isActive ? 'border-blue-500 bg-blue-500/5' :
+                    isSelected ? 'border-green-500 bg-green-500/5' :
+                    'border-dark-border hover:border-gray-500'
+                }`}>
+                <div className="flex items-center justify-between mb-3">
+                    <div className="flex items-center gap-2">
+                        <h3 className="text-white font-semibold text-lg">{provider.name}</h3>
+                        {isActive && <span className="text-xs text-blue-400 bg-blue-500/10 px-2 py-0.5 rounded">生效中</span>}
+                        {isSelected && !isActive && <span className="text-xs text-green-400 bg-green-500/10 px-2 py-0.5 rounded">编辑中</span>}
+                    </div>
+                    <button
+                        onClick={(e) => { e.stopPropagation(); onToggle(id); }}
+                        className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
+                            isActive ? 'bg-blue-600' : 'bg-gray-600'
+                        }`}
+                    >
+                        <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
+                            isActive ? 'translate-x-6' : 'translate-x-1'
+                        }`} />
+                    </button>
+                </div>
+                <div className="text-gray-400 text-sm space-y-1">
+                    <div className="font-mono text-xs">{provider.baseUrl}</div>
+                    <div>默认模型: {provider.defaultModel}</div>
+                </div>
+            </div>
+        );
+
+        const ConfigEditor = ({ provider, onSave }) => {
+            const [baseUrl, setBaseUrl] = useState(provider.baseUrl);
+            const [apiKey, setApiKey] = useState(provider.apiKey);
+            const [defaultModel, setDefaultModel] = useState(provider.defaultModel);
+
+            return (
+                <div className="bg-dark-card border border-dark-border rounded-lg p-5 space-y-4">
+                    <h3 className="text-white font-semibold mb-4">编辑配置 - {provider.name}</h3>
+                    <div>
+                        <label className="block text-gray-400 text-sm mb-2">Base URL</label>
+                        <input
+                            type="text"
+                            value={baseUrl}
+                            onChange={(e) => setBaseUrl(e.target.value)}
+                            className="w-full bg-dark-bg border border-dark-border text-white px-3 py-2 rounded-lg text-sm focus:border-blue-500 focus:outline-none transition-colors font-mono"
+                        />
+                    </div>
+                    <div>
+                        <label className="block text-gray-400 text-sm mb-2">API Key</label>
+                        <input
+                            type="password"
+                            value={apiKey}
+                            onChange={(e) => setApiKey(e.target.value)}
+                            className="w-full bg-dark-bg border border-dark-border text-white px-3 py-2 rounded-lg text-sm focus:border-blue-500 focus:outline-none transition-colors font-mono"
+                        />
+                    </div>
+                    <div>
+                        <label className="block text-gray-400 text-sm mb-2">默认模型</label>
+                        <input
+                            type="text"
+                            value={defaultModel}
+                            onChange={(e) => setDefaultModel(e.target.value)}
+                            className="w-full bg-dark-bg border border-dark-border text-white px-3 py-2 rounded-lg text-sm focus:border-blue-500 focus:outline-none transition-colors font-mono"
+                        />
+                    </div>
+                    <button
+                        onClick={() => onSave({ baseUrl, apiKey, defaultModel })}
+                        className="w-full bg-blue-600 hover:bg-blue-500 text-white py-2 rounded-lg font-medium transition-colors"
+                    >
+                        保存配置
+                    </button>
+                </div>
+            );
+        };
+
+        const AddProviderModal = ({ isOpen, onClose, onSave }) => {
+            const [form, setForm] = useState({
+                id: '', name: '', baseUrl: '', apiKey: '', defaultModel: '', api: 'openai-completions'
+            });
+
+            if (!isOpen) return null;
+
+            return (
+                <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50" onClick={onClose}>
+                    <div className="bg-dark-card border border-dark-border rounded-lg p-6 w-full max-w-md" onClick={(e) => e.stopPropagation()}>
+                        <h3 className="text-white font-semibold text-lg mb-4">新增提供商</h3>
+                        <div className="space-y-3">
+                            <div>
+                                <label className="block text-gray-400 text-sm mb-1">Provider ID</label>
+                                <input type="text" value={form.id} onChange={(e) => setForm({...form, id: e.target.value})}
+                                    className="w-full bg-dark-bg border border-dark-border text-white px-3 py-2 rounded text-sm focus:border-blue-500 focus:outline-none" placeholder="gemini" />
+                            </div>
+                            <div>
+                                <label className="block text-gray-400 text-sm mb-1">Provider Name</label>
+                                <input type="text" value={form.name} onChange={(e) => setForm({...form, name: e.target.value})}
+                                    className="w-full bg-dark-bg border border-dark-border text-white px-3 py-2 rounded text-sm focus:border-blue-500 focus:outline-none" placeholder="Google Gemini" />
+                            </div>
+                            <div>
+                                <label className="block text-gray-400 text-sm mb-1">Base URL</label>
+                                <input type="text" value={form.baseUrl} onChange={(e) => setForm({...form, baseUrl: e.target.value})}
+                                    className="w-full bg-dark-bg border border-dark-border text-white px-3 py-2 rounded text-sm focus:border-blue-500 focus:outline-none font-mono" />
+                            </div>
+                            <div>
+                                <label className="block text-gray-400 text-sm mb-1">API Key</label>
+                                <input type="password" value={form.apiKey} onChange={(e) => setForm({...form, apiKey: e.target.value})}
+                                    className="w-full bg-dark-bg border border-dark-border text-white px-3 py-2 rounded text-sm focus:border-blue-500 focus:outline-none font-mono" />
+                            </div>
+                            <div>
+                                <label className="block text-gray-400 text-sm mb-1">默认模型</label>
+                                <input type="text" value={form.defaultModel} onChange={(e) => setForm({...form, defaultModel: e.target.value})}
+                                    className="w-full bg-dark-bg border border-dark-border text-white px-3 py-2 rounded text-sm focus:border-blue-500 focus:outline-none font-mono" placeholder="gemini-pro" />
+                            </div>
+                            <div>
+                                <label className="block text-gray-400 text-sm mb-1">API Type</label>
+                                <select value={form.api} onChange={(e) => setForm({...form, api: e.target.value})}
+                                    className="w-full bg-dark-bg border border-dark-border text-white px-3 py-2 rounded text-sm focus:border-blue-500 focus:outline-none">
+                                    <option value="openai-completions">openai-completions</option>
+                                    <option value="anthropic-messages">anthropic-messages</option>
+                                </select>
+                            </div>
+                        </div>
+                        <div className="flex gap-3 mt-5">
+                            <button onClick={() => onSave(form)} className="flex-1 bg-blue-600 hover:bg-blue-500 text-white py-2 rounded font-medium transition-colors">保存</button>
+                            <button onClick={onClose} className="flex-1 bg-gray-700 hover:bg-gray-600 text-white py-2 rounded font-medium transition-colors">取消</button>
+                        </div>
+                    </div>
+                </div>
+            );
+        };
+
+        const ConfirmSwitchModal = ({ isOpen, onClose, onConfirm, targetProvider, currentProvider }) => {
+            if (!isOpen || !targetProvider) return null;
+
+            return (
+                <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50">
+                    <div className="bg-dark-card border border-dark-border rounded-lg p-6 w-full max-w-md">
+                        <div className="flex items-center gap-3 mb-4">
+                            <span className="text-2xl">⚠️</span>
+                            <h3 className="text-white font-semibold text-lg">确认切换提供商？</h3>
+                        </div>
+
+                        <div className="mb-5 space-y-3">
+                            <div className="text-gray-300">
+                                即将切换到：<span className="text-blue-400 font-semibold">{targetProvider.name}</span>
+                            </div>
+
+                            <div className="bg-dark-bg border border-dark-border rounded p-3 text-sm text-gray-400">
+                                <div className="font-semibold text-gray-300 mb-2">影响范围：</div>
+                                <ul className="space-y-1 list-disc list-inside">
+                                    <li>更新云端配置中的活跃提供商</li>
+                                    <li>需在本地运行同步脚本生效</li>
+                                </ul>
+                            </div>
+                        </div>
+
+                        <div className="flex gap-3">
+                            <button onClick={onClose}
+                                className="flex-1 bg-gray-700 hover:bg-gray-600 text-white py-2 rounded-lg font-medium transition-colors">
+                                取消
+                            </button>
+                            <button onClick={onConfirm}
+                                className="flex-1 bg-blue-600 hover:bg-blue-500 text-white py-2 rounded-lg font-medium transition-colors">
+                                确认切换
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            );
+        };
+
+        const AgentModelConfig = ({ agents, providers, onSync }) => {
+            const [agentProviders, setAgentProviders] = useState({});
+
+            useEffect(() => {
+                const provs = {};
+                const firstProviderId = Object.keys(providers)[0];
+                agents.forEach(agent => {
+                    provs[agent.id] = firstProviderId;
+                });
+                setAgentProviders(provs);
+            }, [agents, providers]);
+
+            const getModelLabel = (modelId) => {
+                if (!modelId || !modelId.includes('/')) return modelId || '未设置';
+                const [providerId, modelName] = modelId.split('/');
+                const provider = providers[providerId];
+                return provider ? `${provider.name} - ${modelName}` : modelId;
+            };
+
+            return (
+                <div className="bg-dark-card border border-dark-border rounded-lg p-5">
+                    <h3 className="text-white font-semibold mb-4">Agent 模型配置</h3>
+                    {agents.length === 0 ? (
+                        <p className="text-gray-500 text-sm">暂无 Agent 配置。在本地运行同步脚本后，Agent 列表将从本地同步到云端。</p>
+                    ) : (
+                        <div className="space-y-3">
+                            {agents.map(agent => (
+                                <div key={agent.id} className="flex items-center justify-between gap-4">
+                                    <div className="text-gray-300 flex-shrink-0" style={{width: '200px'}}>
+                                        <div className="font-medium">{agent.name}</div>
+                                        <div className="text-xs text-gray-500">{agent.id}</div>
+                                    </div>
+                                    <div className="text-gray-300 text-sm flex-grow">{getModelLabel(agent.model)}</div>
+                                    <div className="flex items-center gap-2 flex-shrink-0">
+                                        <select
+                                            value={agentProviders[agent.id] || ''}
+                                            onChange={(e) => setAgentProviders({...agentProviders, [agent.id]: e.target.value})}
+                                            className="bg-dark-bg border border-dark-border text-white px-2 py-1 rounded text-xs focus:border-blue-500 focus:outline-none"
+                                        >
+                                            {Object.entries(providers).map(([id, provider]) => (
+                                                <option key={id} value={id}>{provider.name}</option>
+                                            ))}
+                                        </select>
+                                        <button
+                                            onClick={() => onSync(agent.id, agentProviders[agent.id])}
+                                            className="bg-blue-600 hover:bg-blue-500 text-white px-3 py-1 rounded text-xs transition-colors"
+                                        >
+                                            同步
+                                        </button>
+                                    </div>
+                                </div>
+                            ))}
+                        </div>
+                    )}
+                </div>
+            );
+        };
+
+        const App = () => {
+            const [authenticated, setAuthenticated] = useState(!!getToken());
+            const [config, setConfig] = useState(null);
+            const [selectedProvider, setSelectedProvider] = useState(null);
+            const [agents, setAgents] = useState([]);
+            const [envScript, setEnvScript] = useState('');
+            const [toast, setToast] = useState({ show: false, message: '', type: 'success' });
+            const [showAddModal, setShowAddModal] = useState(false);
+            const [confirmSwitch, setConfirmSwitch] = useState({ show: false, targetId: null });
+
+            useEffect(() => {
+                if (authenticated) {
+                    loadConfig();
+                    loadAgents();
+                    loadEnvScript();
+                }
+            }, [authenticated]);
+
+            if (!authenticated) {
+                return <LoginScreen onLogin={() => setAuthenticated(true)} />;
+            }
+
+            const loadConfig = async () => {
+                try {
+                    const res = await authFetch(`${API_BASE}/unified-config`);
+                    const data = await res.json();
+                    setConfig(data);
+                    setSelectedProvider(data.active);
+                } catch (e) {}
+            };
+
+            const loadAgents = async () => {
+                try {
+                    const res = await authFetch(`${API_BASE}/agents`);
+                    const data = await res.json();
+                    setAgents(data.agents || []);
+                } catch (e) {}
+            };
+
+            const loadEnvScript = async () => {
+                try {
+                    const res = await authFetch(`${API_BASE}/env-exports`);
+                    const data = await res.json();
+                    if (data.success) setEnvScript(data.content);
+                } catch (e) {}
+            };
+
+            const showToast = (message, type = 'success') => {
+                setToast({ show: true, message, type });
+                setTimeout(() => setToast({ show: false, message: '', type: 'success' }), 3000);
+            };
+
+            const handleToggleProvider = (providerId) => {
+                if (config.active === providerId) return;
+                setConfirmSwitch({ show: true, targetId: providerId });
+            };
+
+            const confirmSwitchProvider = async () => {
+                const targetId = confirmSwitch.targetId;
+                setConfirmSwitch({ show: false, targetId: null });
+
+                const res = await authFetch(`${API_BASE}/switch-provider`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ provider: targetId })
+                });
+
+                const data = await res.json();
+
+                if (!data.success) {
+                    showToast(`切换失败：${data.message}。${data.suggestion || ''}`, 'error');
+                    return;
+                }
+
+                showToast(data.message, 'success');
+                loadConfig();
+            };
+
+            const saveProviderConfig = async (providerId, updates) => {
+                const provider = config.providers[providerId];
+                const updatedProvider = { ...provider, ...updates };
+
+                if (updates.defaultModel && updates.defaultModel !== provider.defaultModel) {
+                    const modelExists = updatedProvider.models && updatedProvider.models.some(m => m.id === updates.defaultModel);
+                    if (!modelExists) {
+                        updatedProvider.models = [...(updatedProvider.models || []), {
+                            id: updates.defaultModel,
+                            name: updates.defaultModel,
+                            contextWindow: 200000,
+                            maxTokens: 8192,
+                            input: ["text", "image"],
+                            cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+                            reasoning: false
+                        }];
+                    }
+                }
+
+                const updatedConfig = {
+                    ...config,
+                    providers: {
+                        ...config.providers,
+                        [providerId]: updatedProvider
+                    }
+                };
+
+                setConfig(updatedConfig);
+
+                await authFetch(`${API_BASE}/unified-config`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(updatedConfig)
+                });
+
+                showToast('配置已保存');
+                await loadConfig();
+                await loadEnvScript();
+            };
+
+            const syncAgentModels = async (agentId, providerId) => {
+                const provider = config.providers[providerId];
+                if (!provider || !provider.defaultModel) {
+                    showToast('提供商或默认模型未配置', 'error');
+                    return;
+                }
+
+                const modelId = `${providerId}/${provider.defaultModel}`;
+
+                const res = await authFetch(`${API_BASE}/update-agent-model`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ agent_id: agentId, model_id: modelId })
+                });
+
+                const data = await res.json();
+                if (data.success) {
+                    showToast(`已同步到 ${provider.name} - ${provider.defaultModel}`, 'success');
+                    await loadAgents();
+                } else {
+                    showToast(data.message || '同步失败', 'error');
+                }
+            };
+
+            const copyToClipboard = (text) => {
+                navigator.clipboard.writeText(text);
+                showToast('已复制到剪贴板');
+            };
+
+            const addProvider = async (formData) => {
+                if (!formData.id || !formData.name || !formData.baseUrl || !formData.apiKey || !formData.defaultModel) {
+                    showToast('请填写所有必填字段', 'error');
+                    return;
+                }
+                config.providers[formData.id] = {
+                    name: formData.name,
+                    baseUrl: formData.baseUrl,
+                    apiKey: formData.apiKey,
+                    defaultModel: formData.defaultModel,
+                    api: formData.api,
+                    models: [{
+                        id: formData.defaultModel,
+                        name: formData.defaultModel,
+                        contextWindow: 200000,
+                        maxTokens: 8192,
+                        input: ['text', 'image'],
+                        reasoning: false,
+                        cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }
+                    }]
+                };
+                await authFetch(`${API_BASE}/unified-config`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(config)
+                });
+                setShowAddModal(false);
+                loadConfig();
+                showToast('提供商添加成功');
+            };
+
+            const generateSyncCommand = () => {
+                const token = getToken();
+                const url = window.location.origin;
+                return `curl -sH "Authorization: Bearer ${token}" ${url}/api/unified-config | python3 ~/.openclaw/local-sync.py`;
+            };
+
+            const handleLogout = () => {
+                clearToken();
+                setAuthenticated(false);
+            };
+
+            if (!config) return <MainLayout><div className="text-white text-center py-20">加载中...</div></MainLayout>;
+
+            return (
+                <MainLayout>
+                    {toast.show && (
+                        <div className={`fixed top-4 right-4 px-6 py-3 rounded-lg shadow-lg ${toast.type === 'error' ? 'bg-red-500' : 'bg-green-500'} text-white font-medium z-50`}>
+                            {toast.message}
+                        </div>
+                    )}
+
+                    <div className="mb-8 flex items-center justify-between">
+                        <div>
+                            <h1 className="text-3xl font-bold text-white mb-2">大模型统一配置管理工具</h1>
+                            <p className="text-gray-400 leading-relaxed">集中管理 LLM 提供商配置、环境变量和 OpenClaw 设置</p>
+                        </div>
+                        <button onClick={handleLogout} className="text-gray-500 hover:text-gray-300 text-sm transition-colors">
+                            退出登录
+                        </button>
+                    </div>
+
+                    <div className="mb-8">
+                        <div className="flex items-center justify-between mb-4">
+                            <h2 className="text-xl font-semibold text-white">提供商管理</h2>
+                            <button onClick={() => setShowAddModal(true)}
+                                className="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white rounded-lg text-sm font-medium transition-colors">
+                                + 新增提供商
+                            </button>
+                        </div>
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+                            {Object.entries(config.providers).map(([id, provider]) => (
+                                <ProviderCard
+                                    key={id}
+                                    id={id}
+                                    provider={provider}
+                                    isActive={config.active === id}
+                                    isSelected={selectedProvider === id}
+                                    onToggle={handleToggleProvider}
+                                    onSelect={setSelectedProvider}
+                                />
+                            ))}
+                        </div>
+                    </div>
+
+                    <div className="mb-8">
+                        <h2 className="text-xl font-semibold text-white mb-4">配置编辑</h2>
+                        {selectedProvider && config.providers[selectedProvider] && (
+                            <ConfigEditor
+                                key={selectedProvider}
+                                provider={config.providers[selectedProvider]}
+                                onSave={(updates) => saveProviderConfig(selectedProvider, updates)}
+                            />
+                        )}
+                    </div>
+
+                    {agents.length > 0 && (
+                        <div className="mb-8">
+                            <h2 className="text-xl font-semibold text-white mb-4">Agent 模型配置</h2>
+                            <AgentModelConfig
+                                agents={agents}
+                                providers={config.providers}
+                                onSync={syncAgentModels}
+                            />
+                        </div>
+                    )}
+
+                    <div className="mb-8">
+                        <h2 className="text-xl font-semibold text-white mb-4">环境变量</h2>
+                        <div className="bg-dark-card border border-dark-border rounded-lg p-5">
+                            <pre className="text-gray-300 text-sm font-mono overflow-x-auto mb-4">{envScript || '暂无环境变量脚本'}</pre>
+                            <button
+                                onClick={() => copyToClipboard(envScript)}
+                                className="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white rounded-lg text-sm font-medium transition-colors"
+                            >
+                                复制脚本
+                            </button>
+                        </div>
+                    </div>
+
+                    <div className="mb-8">
+                        <h2 className="text-xl font-semibold text-white mb-4">本地同步</h2>
+                        <div className="bg-dark-card border border-dark-border rounded-lg p-5">
+                            <p className="text-gray-400 text-sm mb-3">在本地终端运行以下命令，将云端配置同步到本地 OpenClaw：</p>
+                            <pre className="text-green-400 text-sm font-mono bg-dark-bg border border-dark-border rounded p-3 mb-4 overflow-x-auto">
+                                {generateSyncCommand()}
+                            </pre>
+                            <button
+                                onClick={() => copyToClipboard(generateSyncCommand())}
+                                className="px-4 py-2 bg-green-600 hover:bg-green-500 text-white rounded-lg text-sm font-medium transition-colors"
+                            >
+                                复制同步命令
+                            </button>
+                        </div>
+                    </div>
+
+                    <AddProviderModal
+                        isOpen={showAddModal}
+                        onClose={() => setShowAddModal(false)}
+                        onSave={addProvider}
+                    />
+
+                    <ConfirmSwitchModal
+                        isOpen={confirmSwitch.show}
+                        onClose={() => setConfirmSwitch({ show: false, targetId: null })}
+                        onConfirm={confirmSwitchProvider}
+                        targetProvider={confirmSwitch.targetId ? config.providers[confirmSwitch.targetId] : null}
+                        currentProvider={config.providers[config.active]}
+                    />
+                </MainLayout>
+            );
+        };
+
+        ReactDOM.render(<App />, document.getElementById('root'));
+    </script>
+</body>
+</html>
