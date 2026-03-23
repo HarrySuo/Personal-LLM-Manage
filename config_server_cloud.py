@@ -7,7 +7,7 @@ from flask import Flask, jsonify, request, send_from_directory
 
 app = Flask(__name__)
 
-# 云端存储路径（Render 持久磁盘）
+# 云端存储路径（PythonAnywhere: /home/用户名/data/）
 DATA_DIR = Path(os.environ.get('DATA_DIR', '.'))
 UNIFIED_CONFIG = DATA_DIR / 'unified-config.json'
 
